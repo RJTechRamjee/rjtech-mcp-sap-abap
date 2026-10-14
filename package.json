@@ -1,0 +1,31 @@
+{
+  "name": "rjtech-mcp-sap-abap",
+  "version": "0.1.0",
+  "description": "Remote MCP server that serves SAP ABAP Agent Skills (SKILL.md) over Streamable HTTP",
+  "private": true,
+  "type": "module",
+  "main": "server/dist/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node server/dist/index.js",
+    "dev": "tsx watch server/src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "inspect": "npx @modelcontextprotocol/inspector",
+    "deploy": "npm run build && cf push"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "express": "^5.2.1",
+    "yaml": "^2.9.1",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}

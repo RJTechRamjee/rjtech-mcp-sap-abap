@@ -1,0 +1,16 @@
+# Cloud Foundry deployment (SAP BTP trial).
+# Build first: `npm run build` (server/dist is uploaded; devDependencies are not installed on CF).
+# Set the API key once, outside Git:
+#   cf set-env rjtech-mcp-sap-abap MCP_API_KEY <your-key> && cf restage rjtech-mcp-sap-abap
+applications:
+  - name: rjtech-mcp-sap-abap
+    buildpacks:
+      - nodejs_buildpack
+    memory: 256M
+    disk_quota: 512M
+    instances: 1
+    command: npm start
+    health-check-type: http
+    health-check-http-endpoint: /health
+    env:
+      NODE_ENV: production

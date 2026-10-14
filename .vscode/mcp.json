@@ -1,0 +1,19 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "sap-skills-api-key",
+      "description": "API key for the SAP ABAP skills MCP server",
+      "password": true
+    }
+  ],
+  "servers": {
+    "sap-abap-skills-local": {
+      "type": "http",
+      "url": "http://localhost:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:sap-skills-api-key}"
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+node_modules/
+server/src/
+.git/
+.vscode/
+.claude/
+*.log
+.env
