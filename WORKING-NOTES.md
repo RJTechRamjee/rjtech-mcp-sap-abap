@@ -23,8 +23,9 @@
 
 ### Open / next (in this order)
 - [x] Create the public GitHub repo `RJTechRamjee/rjtech-sap-abap-skills` (done by me, still empty).
-- [ ] Push `..\rjtech-sap-abap-skills` to it. Its *Validate skills* check fails until the first server release exists, so re-run it afterwards.
-- [ ] Commit and push this repo. The release workflow then creates `v0.2.<run>`.
+- [x] Pushed `..\rjtech-sap-abap-skills` (commit 7cff6a9).
+- [x] Committed and pushed this repo (9219e69). The release workflow created **v0.2.1**. Tested from the real release: npx launch, `setup`, `validate`, and serve with 5 skills synced from GitHub.
+- [ ] Re-run the skills repo's *Validate skills* check (Actions tab → *Re-run jobs*): its first run came before any release existed.
 - [ ] Run the `setup` command from TEAM-SETUP.md and switch my own VS Code and Eclipse to the stdio config. Delete the old `.env.local` once that works.
 - [ ] Check the Eclipse Copilot MCP JSON (`type: stdio` + `command`/`args`) in a real Eclipse.
 - [ ] Fill in the real `projects` and `systems` in `team/team.yaml`.
