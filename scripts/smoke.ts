@@ -53,12 +53,13 @@ client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
 try {
   await client.connect(transport);
   const instructions = client.getInstructions() ?? "";
-  check(instructions.includes("## Team conventions") && instructions.includes("ZRJ_"), "instructions contain team conventions");
+  check(instructions.includes("## Project conventions") && instructions.includes("ZRJ_"), "instructions contain project conventions");
+  check(instructions.includes("- local-definitions:"), "instructions contain the naming topic index");
   check(instructions.includes("rap-managed-bo"), "instructions contain the skill index");
 
   const tools = (await client.listTools()).tools.map((t) => t.name).sort();
   check(
-    JSON.stringify(tools) === JSON.stringify(["get_team_conventions", "list_skills", "load_skill", "skills_status"]),
+    JSON.stringify(tools) === JSON.stringify(["get_project_conventions", "list_skills", "load_skill", "skills_status"]),
     `tools without SAP: ${tools.join(", ")}`,
   );
 
@@ -71,11 +72,17 @@ try {
   const tpl = textOf(await client.callTool({ name: "load_skill", arguments: { name: "rap-managed-bo", file: "references/templates.md" } }));
   check(tpl.includes("define root view entity"), "load_skill returns a reference file");
 
-  const trav = await client.callTool({ name: "load_skill", arguments: { name: "rap-managed-bo", file: "../../team/team.yaml" } });
+  const trav = await client.callTool({ name: "load_skill", arguments: { name: "rap-managed-bo", file: "../../project/project.yaml" } });
   check(trav.isError === true, "path traversal is refused");
 
-  const conv = textOf(await client.callTool({ name: "get_team_conventions", arguments: {} }));
-  check(conv.includes("ZRJ_<TYPE>_<NAME>") && conv.includes("objectPrefixes"), "get_team_conventions returns conventions and team.yaml");
+  const conv = textOf(await client.callTool({ name: "get_project_conventions", arguments: {} }));
+  check(conv.includes("ZRJ_<MOD>_<SUB>_<TYPE>_<NAME>") && conv.includes("modules:") && conv.includes("objectPrefixes"), "get_project_conventions returns conventions and project.yaml");
+  const local = textOf(await client.callTool({ name: "get_project_conventions", arguments: { topic: "local-definitions" } }));
+  check(local.startsWith("# Naming: local-definitions") && local.includes("iv_"), "get_project_conventions(topic) returns a naming topic");
+  const badTopic = await client.callTool({ name: "get_project_conventions", arguments: { topic: "../project" } });
+  check(badTopic.isError === true, "unknown naming topic is refused");
+  const naming = await client.readResource({ uri: "project://naming/rap-cds" });
+  check(String((naming.contents[0] as { text?: string }).text).includes("_BP_R_<NAME>"), "resources/read of a naming topic works");
 
   const resources = (await client.listResources()).resources;
   check(resources.some((r) => r.uri === "skill://rap-managed-bo/references/templates.md"), `resources/list has ${resources.length} entries`);

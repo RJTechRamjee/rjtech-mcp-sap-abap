@@ -8,6 +8,7 @@ import type { ContentStore, Snapshot } from "./store.js";
 const SERVER_NAME = "rjtech-sap-abap-skills";
 
 const skillIndex = (s: Snapshot) => [...s.skills.values()].map((k) => `- ${k.name}: ${k.description}`).join("\n") || "(none)";
+const topicIndex = (s: Snapshot) => s.project.topics.map((t) => `- ${t.name}: ${t.description}`).join("\n") || "(none)";
 
 function buildInstructions(s: Snapshot, adt?: AdtClient): string {
   const adtLines = adt
@@ -17,15 +18,19 @@ function buildInstructions(s: Snapshot, adt?: AdtClient): string {
       ]
     : ["Skills contain instructions only; no SAP system is connected (ADT tools are off)."];
   return [
-    "This server provides the team's Agent Skills for SAP ABAP Cloud development (RAP, CDS, OData V4, ABAP Unit, BAdIs).",
+    "This server provides the project's Agent Skills for SAP ABAP development (RAP, CDS, OData V4, ABAP Unit, BAdIs).",
     "When a task matches a skill, call load_skill with its name BEFORE writing code, then follow its instructions.",
     "Skills may reference extra files; load them with load_skill(name, file) only when needed.",
-    "Team conventions (below, and via get_team_conventions) override names and examples in individual skills.",
+    "Project conventions (below, and via get_project_conventions) override names and examples in individual skills.",
+    "Before naming ABAP objects, variables, types or parameters, call get_project_conventions with the matching naming topic.",
     "Skills are updated centrally while you work; list_skills always returns the current list.",
     ...adtLines,
     "",
-    "## Team conventions",
-    s.team.conventions || "(none defined)",
+    "## Project conventions",
+    s.project.conventions || "(none defined)",
+    "",
+    "## Naming topics (load with get_project_conventions topic=...)",
+    topicIndex(s),
     "",
     "## Available skills",
     skillIndex(s),
@@ -49,7 +54,7 @@ export function createMcpServer(store: ContentStore, version: string, adt?: AdtC
     { name: SERVER_NAME, version },
     { instructions: buildInstructions(store.current, adt), capabilities: { tools: { listChanged: true }, resources: { listChanged: true } } },
   );
-  if (adt) registerAdtTools(server, adt, () => store.current.team);
+  if (adt) registerAdtTools(server, adt, () => store.current.project);
 
   server.registerResource(
     "skill-files",
@@ -73,10 +78,30 @@ export function createMcpServer(store: ContentStore, version: string, adt?: AdtC
   );
 
   server.registerResource(
-    "team-conventions",
-    "team://conventions",
-    { title: "Team conventions", description: "Naming conventions, projects and packages of the team", mimeType: "text/markdown" },
+    "project-conventions",
+    "project://conventions",
+    { title: "Project conventions", description: "Core conventions, naming topics, applications and packages of the project", mimeType: "text/markdown" },
     async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/markdown", text: conventionsText(store.current) }] }),
+  );
+
+  server.registerResource(
+    "project-naming",
+    new ResourceTemplate("project://naming/{topic}", {
+      list: async () => ({
+        resources: store.current.project.topics.map((t) => ({
+          uri: `project://naming/${t.name}`,
+          name: `naming: ${t.name}`,
+          description: t.description,
+          mimeType: "text/markdown",
+        })),
+      }),
+    }),
+    { title: "Naming conventions", description: "Detailed naming rules of the project, one document per topic" },
+    async (uri, vars) => {
+      const topic = store.current.project.topics.find((t) => t.name === String(vars.topic));
+      if (!topic) throw new Error(`Unknown naming topic "${vars.topic}".`);
+      return { contents: [{ uri: uri.href, mimeType: "text/markdown", text: topic.body }] };
+    },
   );
 
   server.registerTool(
@@ -112,8 +137,8 @@ export function createMcpServer(store: ContentStore, version: string, adt?: AdtC
         const extras = skill.files.length
           ? `\n\n---\nExtra files (load with load_skill name="${skill.name}" file="..."): ${skill.files.join(", ")}`
           : "";
-        const team = s.team.conventions ? "\n\nTeam conventions override names in this skill (see get_team_conventions)." : "";
-        return text(`# Skill: ${skill.name}\n\n${skill.body}${extras}${team}`);
+        const conv = s.project.conventions ? "\n\nProject conventions override names in this skill (see get_project_conventions)." : "";
+        return text(`# Skill: ${skill.name}\n\n${skill.body}${extras}${conv}`);
       }
       try {
         return text(readSkillFile(s.files, skill, file));
@@ -124,15 +149,27 @@ export function createMcpServer(store: ContentStore, version: string, adt?: AdtC
   );
 
   server.registerTool(
-    "get_team_conventions",
+    "get_project_conventions",
     {
-      title: "Get team conventions",
+      title: "Get project conventions",
       description:
-        "Returns the team's current naming conventions, projects, packages and rules. Call it before naming or creating ABAP objects.",
-      inputSchema: {},
+        "Without `topic`: returns the project's core conventions, the list of naming topics and project.yaml (applications, packages, ADT prefixes). " +
+        "With `topic`: returns that topic's detailed naming rules. Call it before naming or creating ABAP objects, variables, types or parameters.",
+      inputSchema: {
+        topic: z.string().optional().describe("Naming topic, e.g. global-objects, rap-cds or local-definitions"),
+      },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async () => text(conventionsText(store.current)),
+    async ({ topic }) => {
+      const s = store.current;
+      if (!topic) return text(conventionsText(s));
+      const found = s.project.topics.find((t) => t.name === topic);
+      if (!found) {
+        const names = s.project.topics.map((t) => t.name).join(", ") || "(none)";
+        return { isError: true, ...text(`Unknown naming topic "${topic}". Available: ${names}`) };
+      }
+      return text(`# Naming: ${found.name}\n\n${found.body}`);
+    },
   );
 
   server.registerTool(
@@ -155,7 +192,7 @@ export function createMcpServer(store: ContentStore, version: string, adt?: AdtC
           `Last check: ${store.lastCheck?.toISOString() ?? "never"}`,
           `Last error: ${store.lastError ?? "none"}`,
           `ADT: ${adt ? adt.systemUrl : "off"}`,
-          `Write tools allow objects ${s.team.objectPrefixes.join("/")}* in packages ${s.team.packagePrefixes.join("/")}*`,
+          `Write tools allow objects ${s.project.objectPrefixes.join("/")}* in packages ${s.project.packagePrefixes.join("/")}*`,
           s.problems.length ? `Content problems:\n- ${s.problems.join("\n- ")}` : "Content problems: none",
         ].join("\n"),
       );
@@ -176,11 +213,14 @@ export function createMcpServer(store: ContentStore, version: string, adt?: AdtC
 
 function conventionsText(s: Snapshot): string {
   return [
-    s.team.conventions || "No team/conventions.md in the skills repo.",
+    s.project.conventions || "No project/conventions.md in the skills repo.",
     "",
-    "## team.yaml",
+    "## Naming topics (load with get_project_conventions topic=...)",
+    topicIndex(s),
+    "",
+    "## project.yaml",
     "```yaml",
-    s.team.yaml || "# (no team/team.yaml)",
+    s.project.yaml || "# (no project/project.yaml)",
     "```",
   ].join("\n");
 }

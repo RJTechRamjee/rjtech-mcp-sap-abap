@@ -7,7 +7,7 @@ import { AdtClient, adtConfigFromEnv } from "./adt.js";
 import { configFile, loadUserConfig, log, packageRoot, readSettings } from "./config.js";
 import { createMcpServer } from "./mcp.js";
 import { runSetup } from "./setup.js";
-import { parseSkills, parseTeam, readContentDir } from "./skills.js";
+import { PROJECT_CONVENTIONS, PROJECT_YAML, parseProject, parseSkills, readContentDir } from "./skills.js";
 import { ContentStore } from "./store.js";
 import { findNewerServer } from "./updater.js";
 
@@ -65,7 +65,7 @@ async function main() {
           "",
           "  (no command)       start the MCP server on stdio (your IDE does this)",
           "  setup              create or update your settings in " + configFile,
-          "  validate [dir]     check a skills repo checkout (skills/ and team/) for problems",
+          "  validate [dir]     check a skills repo checkout (skills/ and project/) for problems",
           "  --version          print the version",
         ].join("\n"),
       );
@@ -102,14 +102,13 @@ async function serve() {
 async function validate(dir: string): Promise<number> {
   const files = await readContentDir(path.resolve(dir));
   const { skills, problems } = parseSkills(files);
-  const team = parseTeam(files);
-  const all = [...problems, ...team.problems];
-  if (!files.has("team/conventions.md")) all.push("team/conventions.md is missing.");
-  if (!files.has("team/team.yaml")) all.push("team/team.yaml is missing.");
-  if (skills.size === 0) all.push(`No skills found under ${path.resolve(dir, "skills")}.`);
+  const project = parseProject(files);
+  const all = [...problems, ...project.problems];
+  if (!files.has(PROJECT_CONVENTIONS)) all.push(`${PROJECT_CONVENTIONS} is missing.`);
+  if (!files.has(PROJECT_YAML)) all.push(`${PROJECT_YAML} is missing.`);  if (skills.size === 0) all.push(`No skills found under ${path.resolve(dir, "skills")}.`);
 
   console.log(`Skills (${skills.size}): ${[...skills.keys()].join(", ") || "-"}`);
-  console.log(`ADT write rules: objects ${team.team.objectPrefixes.join("/")}*, packages ${team.team.packagePrefixes.join("/")}*`);
+  console.log(`ADT write rules: objects ${project.project.objectPrefixes.join("/")}*, packages ${project.project.packagePrefixes.join("/")}*`);
   if (all.length) {
     console.log(`\n${all.length} problem(s):`);
     for (const p of all) console.log(`  - ${p}`);

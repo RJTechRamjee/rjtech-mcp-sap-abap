@@ -11,7 +11,7 @@ export const homeDir = process.env.RJTECH_MCP_HOME ?? path.join(os.homedir(), ".
 export const configFile = path.join(homeDir, "config.env");
 
 /**
- * The GitHub repo the skills and team conventions come from (separate from this server repo).
+ * The GitHub repo the skills and project conventions come from (separate from this server repo).
  * Override with SKILLS_REPO, e.g. if the repo moves to an organization.
  */
 export const DEFAULT_REPO = "RJTechRamjee/rjtech-sap-abap-skills";
@@ -31,7 +31,7 @@ export interface Settings {
   branch: string;
   token?: string;
   syncIntervalMs: number;
-  /** Local mode: a checkout of the skills repo (folder that contains skills/ and team/). */
+  /** Local mode: a checkout of the skills repo (folder that contains skills/ and project/). */
   localDir: string;
 }
 

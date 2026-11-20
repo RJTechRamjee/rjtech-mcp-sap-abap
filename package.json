@@ -1,7 +1,7 @@
 {
   "name": "rjtech-mcp-sap-abap",
-  "version": "0.2.0",
-  "description": "Local MCP server (stdio) that serves a team's SAP ABAP Agent Skills, synced live from a GitHub repo, plus optional ADT tools",
+  "version": "0.3.0",
+  "description": "Local MCP server (stdio) that serves a project's SAP ABAP Agent Skills, synced live from a GitHub repo, plus optional ADT tools",
   "private": true,
   "type": "module",
   "repository": {

@@ -2,13 +2,13 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
 import { homeDir, log, USER_AGENT, type Settings } from "./config.js";
-import { isContentPath, parseSkills, parseTeam, readContentDir, type ContentFiles, type Skill, type Team } from "./skills.js";
+import { isContentPath, parseSkills, parseProject, readContentDir, type ContentFiles, type Project, type Skill } from "./skills.js";
 
-/** One consistent version of all skills and team settings. Replaced as a whole on every change. */
+/** One consistent version of all skills and project settings. Replaced as a whole on every change. */
 export interface Snapshot {
   files: ContentFiles;
   skills: Map<string, Skill>;
-  team: Team;
+  project: Project;
   problems: string[];
   /** Where the content came from, e.g. "github main@1a2b3c4" or "local folder". */
   source: string;
@@ -24,8 +24,8 @@ interface CacheFile {
 
 function buildSnapshot(files: ContentFiles, source: string): Snapshot {
   const s = parseSkills(files);
-  const t = parseTeam(files);
-  return { files, skills: s.skills, team: t.team, problems: [...s.problems, ...t.problems], source };
+  const p = parseProject(files);
+  return { files, skills: s.skills, project: p.project, problems: [...s.problems, ...p.problems], source };
 }
 
 /**
@@ -178,7 +178,7 @@ export class ContentStore {
 }
 
 /**
- * Reads the text files under skills/ and team/ from an (uncompressed) tar archive as GitHub
+ * Reads the text files under skills/ and project/ from an (uncompressed) tar archive as GitHub
  * produces it: one top folder "<owner>-<repo>-<sha>/", ustar headers, pax headers for long names.
  */
 export function extractContent(tar: Buffer): ContentFiles {

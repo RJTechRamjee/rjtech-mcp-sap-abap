@@ -98,7 +98,7 @@ To change anything later (for example a new SAP password), run the same command 
 
 1. Open Copilot Chat and switch to **Agent** mode. MCP tools are not used in Ask or Edit mode.
 2. Ask: *"Call skills_status"*. You should see `Skills: 5 (...)` and `Last error: none`. If you connected SAP, you should also see `ADT: <your SAP URL>`.
-3. Try a real task, e.g. *"Create a managed RAP BO for a Travel table"*. Copilot should load the `rap-managed-bo` skill and use names like `ZRJ_R_Travel`.
+3. Try a real task, e.g. *"Create a managed RAP BO for a Travel table"*. Copilot should load the `rap-managed-bo` skill and use names like `ZRJ_CA_DMO_R_Travel` (module + submodule after `ZRJ_`).
 
 ## Day-to-day
 
@@ -111,7 +111,7 @@ To change anything later (for example a new SAP password), run the same command 
 When the ADT tools are connected:
 
 - Copilot can create, update, read and activate **classes and interfaces**. It cannot delete anything.
-- Names must follow the team prefix (currently `ZRJ_`) in a team package or a `$` package. Anything else is refused.
+- Names must follow the project prefix (currently `ZRJ_`) in a project package or a `$` package. Anything else is refused.
 - Transportable packages need a transport request, and Copilot asks you for it.
 - Other object types (CDS, BDEF, tables, BAdI implementations) aren't covered yet. For those, Copilot writes the code and you create the object in ADT.
 

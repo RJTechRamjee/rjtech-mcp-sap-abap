@@ -34,8 +34,8 @@ GitHub                                         Each developer's PC
 ──────                                         ───────────────────
 rjtech-sap-abap-skills  (content)              IDE starts: npx -y <...>/releases/latest/download/rjtech-mcp-sap-abap.tgz
   skills/*/SKILL.md          ◄── every 5 min ──  MCP server
-  team/conventions.md            (download only    ├─ ContentStore: current skills + conventions
-  team/team.yaml                  if changed)       ├─ cache:  %USERPROFILE%\.rjtech-mcp\cache\
+  project/conventions.md         (download only    ├─ ContentStore: current skills + conventions
+  project/project.yaml + naming/  if changed)       ├─ cache:  %USERPROFILE%\.rjtech-mcp\cache\
                                                     ├─ server: %USERPROFILE%\.rjtech-mcp\server\<version>.mjs
 rjtech-mcp-sap-abap  (code)                         └─ config: %USERPROFILE%\.rjtech-mcp\config.env
   push to main ─► GitHub Action ─► Release  ◄── on start ── newer release? download it and switch to it
@@ -43,7 +43,7 @@ rjtech-mcp-sap-abap  (code)                         └─ config: %USERPROFILE%
 
 | What changes | Who does it | How it reaches developers |
 |---|---|---|
-| A skill or `team/*` | Merge a PR in the skills repo | The server notices within about 5 minutes, while running, with no restart |
+| A skill or `project/*` | Merge a PR in the skills repo | The server notices within about 5 minutes, while running, with no restart |
 | Server code | Merge to main here | The Action creates a GitHub Release; each server switches to it on its next start |
 | Personal settings (SAP password) | The `setup` command | Read at server start |
 
@@ -65,7 +65,7 @@ is ignored, which was tested. So each release bundle checks on start:
    hour per network address, and a team in one office shares that.
 2. If the commit is the same as last time, stop.
 3. Otherwise, download the repo as one compressed archive and keep the text files under
-   `skills/` and `team/`. The new set replaces the old one in a single step, so the model never
+   `skills/` and `project/`. The new set replaces the old one in a single step, so the model never
    sees half an update.
 4. The result is written to the disk cache. The next IDE start uses it immediately, even offline.
 5. Connected clients are told that the tool and resource lists changed.
@@ -78,10 +78,10 @@ If GitHub can't be reached, the server keeps the last good version and `skills_s
 
 | MCP concept | Here | Purpose |
 |---|---|---|
-| **Instructions** | `buildInstructions` in [mcp.ts](server/src/mcp.ts) | Sent once at connect: team conventions, "call `load_skill` before writing code", and a one-line index of all skills |
-| **Tools** | `list_skills`, `load_skill(name, file?)`, `get_team_conventions`, `skills_status` | Functions the **model decides to call on its own** |
+| **Instructions** | `buildInstructions` in [mcp.ts](server/src/mcp.ts) | Sent once at connect: project conventions, the naming topic index, "call `load_skill` before writing code", and a one-line index of all skills |
+| **Tools** | `list_skills`, `load_skill(name, file?)`, `get_project_conventions(topic?)`, `skills_status` | Functions the **model decides to call on its own** |
 | **ADT tools** (if SAP is configured) | `adt_create_class`, `adt_create_interface`, `adt_update_source`, `adt_activate`, `adt_read_source`, `adt_discovery`, `adt_get` | Create, change and activate objects through the same REST API Eclipse uses |
-| **Resources** | `skill://<name>/<file>`, `team://conventions` | The same content as documents the user can browse and attach |
+| **Resources** | `skill://<name>/<file>`, `project://conventions`, `project://naming/<topic>` | The same content as documents the user can browse and attach |
 
 Tools work like function modules the AI can call. Resources work like files it can open.
 
@@ -99,7 +99,7 @@ Copilot                                           MCP server (child process of t
 ───────                                           ─────────────────────────────────────
 1. initialize                               ──►
                                             ◄──   name, version, instructions
-                                                  (team conventions + skill index)
+                                                  (project conventions + skill index)
 2. tools/list                               ──►
                                             ◄──   list_skills, load_skill, ... + schemas
 3. tools/call load_skill rap-managed-bo     ──►
@@ -117,7 +117,7 @@ Key points:
 - **Skills are instructions only.** Nothing in the skills repo is executed. The model in Copilot does the thinking.
 - **Progressive disclosure:** the model gets a short index first, then loads a full skill, then loads `references/` files only when needed.
 - **Path traversal is impossible by construction:** files are served from the in-memory map of synced files, never from a path on disk.
-- **ADT guard:** write tools only accept names allowed by `team/team.yaml` (currently `ZRJ_`), and never anything outside Z*/Y*/$.
+- **ADT guard:** write tools only accept names allowed by `project/project.yaml` (currently `ZRJ_`), and never anything outside Z*/Y*/$.
 - **MCP tools are only used in Copilot Agent mode.**
 
 ---

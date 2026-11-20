@@ -24,18 +24,18 @@ export interface AdtMessage {
 export class AdtError extends Error {}
 
 /**
- * Hard floor, whatever team.yaml says: only customer objects/packages (Z*, Y*, local $ packages).
+ * Hard floor, whatever project.yaml says: only customer objects/packages (Z*, Y*, local $ packages).
  * No SAP or namespaced objects.
  */
 const OBJECT_NAME = /^[ZY][A-Z0-9_]{1,29}$/;
 const PACKAGE_NAME = /^([ZY][A-Z0-9_]{0,29}|\$[A-Z0-9_]{1,29})$/;
 
-/** Checks a name for a write tool. `prefixes` come from team.yaml (adt.objectPrefixes) and narrow the floor further. */
+/** Checks a name for a write tool. `prefixes` come from project.yaml (adt.objectPrefixes) and narrow the floor further. */
 export function checkObjectName(name: string, prefixes: string[] = ["Z", "Y"]): string {
   const upper = name.toUpperCase();
   if (!OBJECT_NAME.test(upper)) throw new AdtError(`Object name "${name}" must start with Z or Y and use only A-Z, 0-9, _ (max 30).`);
   if (!prefixes.some((p) => upper.startsWith(p))) {
-    throw new AdtError(`Object name "${name}" must start with ${prefixes.join(" or ")} (team convention, team/team.yaml).`);
+    throw new AdtError(`Object name "${name}" must start with ${prefixes.join(" or ")} (project convention, project/project.yaml).`);
   }
   return upper;
 }
@@ -44,7 +44,7 @@ export function checkPackageName(name: string, prefixes: string[] = ["Z", "Y", "
   const upper = name.toUpperCase();
   if (!PACKAGE_NAME.test(upper)) throw new AdtError(`Package "${name}" must start with Z, Y or $.`);
   if (!prefixes.some((p) => upper.startsWith(p))) {
-    throw new AdtError(`Package "${name}" must start with ${prefixes.join(" or ")} (team convention, team/team.yaml).`);
+    throw new AdtError(`Package "${name}" must start with ${prefixes.join(" or ")} (project convention, project/project.yaml).`);
   }
   return upper;
 }

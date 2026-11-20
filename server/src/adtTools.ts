@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { AdtClient, AdtError, checkObjectName, checkPackageName, type AdtMessage, type ObjectKind } from "./adt.js";
-import type { Team } from "./skills.js";
+import type { Project } from "./skills.js";
 
 const kindSchema = z.enum(["class", "interface"]).describe("Object type");
 const transportSchema = z
@@ -40,12 +40,12 @@ function guarded<A>(adt: AdtClient, fn: (args: A) => Promise<{ isError?: boolean
 }
 
 /** Registers the ADT tools that create and change objects in the connected SAP system. */
-export function registerAdtTools(server: McpServer, adt: AdtClient, team: () => Team): void {
+export function registerAdtTools(server: McpServer, adt: AdtClient, project: () => Project): void {
   const write = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
   const read = { readOnlyHint: true, openWorldHint: true };
-  // Read the prefixes on every call so a team.yaml change applies without a restart.
-  const objName = (n: string) => checkObjectName(n, team().objectPrefixes);
-  const pkgName = (n: string) => checkPackageName(n, team().packagePrefixes);
+  // Read the prefixes on every call so a project.yaml change applies without a restart.
+  const objName = (n: string) => checkObjectName(n, project().objectPrefixes);
+  const pkgName = (n: string) => checkPackageName(n, project().packagePrefixes);
 
   for (const kind of ["interface", "class"] as const) {
     server.registerTool(
@@ -54,12 +54,12 @@ export function registerAdtTools(server: McpServer, adt: AdtClient, team: () => 
         title: `Create ABAP ${kind}`,
         description:
           `Creates a global ABAP ${kind} in the connected SAP system, writes its source and activates it. ` +
-          `Only names and packages allowed by the team conventions (see get_team_conventions). Fails if the ${kind} already exists; use adt_update_source then.` +
+          `Only names and packages allowed by the project conventions (see get_project_conventions). Fails if the ${kind} already exists; use adt_update_source then.` +
           (kind === "class" ? " Pass testClasses to fill the local test classes include (ABAP Unit)." : ""),
         inputSchema: {
-          name: z.string().describe(kind === "class" ? "e.g. ZRJ_CL_DISCOUNT_DE" : "e.g. ZRJ_IF_DISCOUNT"),
+          name: z.string().describe(kind === "class" ? "e.g. ZRJ_SD_PRC_CL_DISCOUNT_DE" : "e.g. ZRJ_SD_PRC_IF_DISCOUNT"),
           description: z.string().max(60).describe("Short text, max 60 characters"),
-          package: z.string().describe("Package, e.g. ZRJ_TRAVEL or $TMP"),
+          package: z.string().describe("Package, e.g. ZRJ_SD_PRC or $TMP"),
           transport: transportSchema,
           source: z.string().describe(`Full source code of the ${kind}`),
           ...(kind === "class"
