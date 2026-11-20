@@ -2,3 +2,5 @@ node_modules/
 server/dist/
 *.log
 .env
+.env.local
+dist/

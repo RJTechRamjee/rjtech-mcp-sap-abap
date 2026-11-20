@@ -1,100 +1,186 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { readSkillFile, type Skill } from "./skills.js";
+import type { AdtClient } from "./adt.js";
+import { registerAdtTools } from "./adtTools.js";
+import { readSkillFile } from "./skills.js";
+import type { ContentStore, Snapshot } from "./store.js";
 
 const SERVER_NAME = "rjtech-sap-abap-skills";
-const SERVER_VERSION = "0.1.0";
 
-function buildInstructions(skills: Map<string, Skill>): string {
-  const index = [...skills.values()].map((s) => `- ${s.name}: ${s.description}`).join("\n");
+const skillIndex = (s: Snapshot) => [...s.skills.values()].map((k) => `- ${k.name}: ${k.description}`).join("\n") || "(none)";
+
+function buildInstructions(s: Snapshot, adt?: AdtClient): string {
+  const adtLines = adt
+    ? [
+        `ADT tools (adt_*) are connected to the SAP system ${adt.systemUrl}. Use them to create, read, update and activate classes and interfaces.`,
+        "Confirm package, transport and object names with the user before the first write. If activation fails, fix the code and call adt_update_source.",
+      ]
+    : ["Skills contain instructions only; no SAP system is connected (ADT tools are off)."];
   return [
-    "This server provides Agent Skills for SAP ABAP Cloud development (RAP, CDS, OData V4, ABAP Unit).",
-    "When a task matches a skill below, call load_skill with its name BEFORE writing code, then follow its instructions.",
+    "This server provides the team's Agent Skills for SAP ABAP Cloud development (RAP, CDS, OData V4, ABAP Unit, BAdIs).",
+    "When a task matches a skill, call load_skill with its name BEFORE writing code, then follow its instructions.",
     "Skills may reference extra files; load them with load_skill(name, file) only when needed.",
-    "Skills contain instructions only; nothing is executed on this server.",
+    "Team conventions (below, and via get_team_conventions) override names and examples in individual skills.",
+    "Skills are updated centrally while you work; list_skills always returns the current list.",
+    ...adtLines,
     "",
-    "Available skills:",
-    index || "(none)",
+    "## Team conventions",
+    s.team.conventions || "(none defined)",
+    "",
+    "## Available skills",
+    skillIndex(s),
   ].join("\n");
 }
 
-const uriFor = (skill: string, file = "SKILL.md") => `skill://${skill}/${file}`;
+const loadSkillDescription = (s: Snapshot) =>
+  "Returns the full instructions of a skill (its SKILL.md). Pass `file` to load one of the skill's extra files instead, e.g. a reference listed by list_skills.\n\nCurrent skills:\n" +
+  skillIndex(s);
 
-function mimeFor(file: string): string {
-  return file.endsWith(".md") ? "text/markdown" : file.endsWith(".json") ? "application/json" : "text/plain";
-}
+const mimeFor = (file: string) => (file.endsWith(".md") ? "text/markdown" : file.endsWith(".json") ? "application/json" : "text/plain");
+const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 
-/** Builds a fresh MCP server. Called per request because the HTTP transport runs stateless. */
-export function createMcpServer(skills: Map<string, Skill>): McpServer {
+/**
+ * Builds the MCP server. Every handler reads store.current, so a sync is visible on the
+ * next call. The skill index in the load_skill description and the resource list are
+ * refreshed when the store changes (clients are told via list_changed notifications).
+ */
+export function createMcpServer(store: ContentStore, version: string, adt?: AdtClient): McpServer {
   const server = new McpServer(
-    { name: SERVER_NAME, version: SERVER_VERSION },
-    { instructions: buildInstructions(skills) },
+    { name: SERVER_NAME, version },
+    { instructions: buildInstructions(store.current, adt), capabilities: { tools: { listChanged: true }, resources: { listChanged: true } } },
+  );
+  if (adt) registerAdtTools(server, adt, () => store.current.team);
+
+  server.registerResource(
+    "skill-files",
+    new ResourceTemplate("skill://{skill}/{+file}", {
+      list: async () => ({
+        resources: [...store.current.skills.values()].flatMap((k) => [
+          { uri: `skill://${k.name}/SKILL.md`, name: k.name, description: k.description, mimeType: "text/markdown" },
+          ...k.files.map((f) => ({ uri: `skill://${k.name}/${f}`, name: `${k.name}: ${f}`, mimeType: mimeFor(f) })),
+        ]),
+      }),
+    }),
+    { title: "Skill files", description: "SKILL.md and reference files of each skill" },
+    async (uri, vars) => {
+      const s = store.current;
+      const skill = s.skills.get(String(vars.skill));
+      if (!skill) throw new Error(`Unknown skill "${vars.skill}".`);
+      const file = String(vars.file);
+      const body = file === "SKILL.md" ? skill.body : readSkillFile(s.files, skill, file);
+      return { contents: [{ uri: uri.href, mimeType: mimeFor(file), text: body }] };
+    },
   );
 
-  for (const skill of skills.values()) {
-    server.registerResource(
-      `${skill.name}`,
-      uriFor(skill.name),
-      { title: skill.name, description: skill.description, mimeType: "text/markdown" },
-      async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/markdown", text: skill.body }] }),
-    );
-    for (const file of skill.files) {
-      server.registerResource(
-        `${skill.name}/${file}`,
-        uriFor(skill.name, file),
-        { title: `${skill.name}: ${file}`, mimeType: mimeFor(file) },
-        async (uri) => ({ contents: [{ uri: uri.href, mimeType: mimeFor(file), text: await readSkillFile(skill, file) }] }),
-      );
-    }
-  }
+  server.registerResource(
+    "team-conventions",
+    "team://conventions",
+    { title: "Team conventions", description: "Naming conventions, projects and packages of the team", mimeType: "text/markdown" },
+    async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/markdown", text: conventionsText(store.current) }] }),
+  );
 
   server.registerTool(
     "list_skills",
     {
       title: "List skills",
-      description: "Lists the available SAP ABAP skills with their descriptions and extra files.",
+      description: "Lists the available SAP ABAP skills with their descriptions and extra files (always the latest synced list).",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async () => {
-      const list = [...skills.values()].map(({ name, description, files }) => ({ name, description, files }));
-      return { content: [{ type: "text", text: JSON.stringify(list, null, 2) }] };
+      const list = [...store.current.skills.values()].map(({ name, description, files }) => ({ name, description, files }));
+      return text(JSON.stringify(list, null, 2));
     },
   );
 
-  server.registerTool(
+  const loadSkill = server.registerTool(
     "load_skill",
     {
       title: "Load skill",
-      description:
-        "Returns the full instructions of a skill (its SKILL.md). Pass `file` to load one of the skill's extra files instead, e.g. a reference document listed by list_skills.",
+      description: loadSkillDescription(store.current),
       inputSchema: {
         name: z.string().describe("Skill name, e.g. rap-managed-bo"),
-        file: z.string().optional().describe("Optional extra file path inside the skill, e.g. references/naming.md"),
+        file: z.string().optional().describe("Optional extra file path inside the skill, e.g. references/templates.md"),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async ({ name, file }) => {
-      const skill = skills.get(name);
-      if (!skill) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: `Unknown skill "${name}". Available: ${[...skills.keys()].join(", ")}` }],
-        };
-      }
+      const s = store.current;
+      const skill = s.skills.get(name);
+      if (!skill) return { isError: true, ...text(`Unknown skill "${name}". Available: ${[...s.skills.keys()].join(", ")}`) };
       if (!file || file === "SKILL.md") {
         const extras = skill.files.length
           ? `\n\n---\nExtra files (load with load_skill name="${skill.name}" file="..."): ${skill.files.join(", ")}`
           : "";
-        return { content: [{ type: "text", text: `# Skill: ${skill.name}\n\n${skill.body}${extras}` }] };
+        const team = s.team.conventions ? "\n\nTeam conventions override names in this skill (see get_team_conventions)." : "";
+        return text(`# Skill: ${skill.name}\n\n${skill.body}${extras}${team}`);
       }
       try {
-        return { content: [{ type: "text", text: await readSkillFile(skill, file) }] };
+        return text(readSkillFile(s.files, skill, file));
       } catch (err) {
-        return { isError: true, content: [{ type: "text", text: (err as Error).message }] };
+        return { isError: true, ...text((err as Error).message) };
       }
     },
   );
 
+  server.registerTool(
+    "get_team_conventions",
+    {
+      title: "Get team conventions",
+      description:
+        "Returns the team's current naming conventions, projects, packages and rules. Call it before naming or creating ABAP objects.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async () => text(conventionsText(store.current)),
+  );
+
+  server.registerTool(
+    "skills_status",
+    {
+      title: "Skills sync status",
+      description: "Shows where the skills come from, which version is loaded, when it was last checked and any content problems. Use it to troubleshoot.",
+      inputSchema: { refresh: z.boolean().default(false).describe("Check GitHub for updates now") },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ refresh }) => {
+      if (refresh) await store.sync();
+      const s = store.current;
+      return text(
+        [
+          `Server version: ${version}`,
+          `Source: ${store.description}`,
+          `Loaded: ${s.source}`,
+          `Skills: ${s.skills.size} (${[...s.skills.keys()].join(", ")})`,
+          `Last check: ${store.lastCheck?.toISOString() ?? "never"}`,
+          `Last error: ${store.lastError ?? "none"}`,
+          `ADT: ${adt ? adt.systemUrl : "off"}`,
+          `Write tools allow objects ${s.team.objectPrefixes.join("/")}* in packages ${s.team.packagePrefixes.join("/")}*`,
+          s.problems.length ? `Content problems:\n- ${s.problems.join("\n- ")}` : "Content problems: none",
+        ].join("\n"),
+      );
+    },
+  );
+
+  const unsubscribe = store.onChange((s) => {
+    loadSkill.update({ description: loadSkillDescription(s) }); // also sends tools/list_changed
+    if (server.isConnected()) server.sendResourceListChanged();
+  });
+  const close = server.close.bind(server);
+  server.close = async () => {
+    unsubscribe();
+    await close();
+  };
   return server;
+}
+
+function conventionsText(s: Snapshot): string {
+  return [
+    s.team.conventions || "No team/conventions.md in the skills repo.",
+    "",
+    "## team.yaml",
+    "```yaml",
+    s.team.yaml || "# (no team/team.yaml)",
+    "```",
+  ].join("\n");
 }

@@ -4,31 +4,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A remote MCP server that serves SAP ABAP Agent Skills (`skills/<name>/SKILL.md` folders) over Streamable HTTP, so the same skills can be used from VS Code and Eclipse (ADT) in any workspace. It is hosted on SAP BTP trial (Cloud Foundry). Skills are instructions only; nothing in them is executed on the server.
+A local MCP server (stdio) that each developer's IDE (VS Code, Eclipse ADT with GitHub Copilot) starts via `npx -y https://github.com/RJTechRamjee/rjtech-mcp-sap-abap/releases/latest/download/rjtech-mcp-sap-abap.tgz`. There is deliberately **no npm registry**: the project scope rules out public npmjs. npx caches that launcher forever, so the server updates itself from GitHub Releases (see `updater.ts`). It serves SAP ABAP Agent Skills and team conventions that it syncs live from a **separate public repo**, `RJTechRamjee/rjtech-sap-abap-skills` (`skills/<name>/SKILL.md`, `team/conventions.md`, `team/team.yaml`). With SAP settings, it also offers ADT tools that create, update and activate classes and interfaces. There is no hosted server any more: the BTP deployment was removed on 2026-11-20.
 
 ## Commands
 
-- `npm run dev` runs the TypeScript sources with auto-reload (tsx).
-- `npm run build` compiles `server/src` to `server/dist`. `npm run typecheck` checks types without emitting.
-- `npm start` runs the compiled server.
-- `npm run inspect` opens the MCP Inspector to call the tools by hand.
-- `npm run deploy` builds, then runs `cf push`. The compiled `server/dist` is uploaded because CF does not install devDependencies, so always build before pushing.
+- `npm run dev` runs the server from source on stdio. It's only useful when started by an MCP client: `.vscode/mcp.json` does this against `../rjtech-sap-abap-skills`.
+- `npm run setup` runs the interactive per-user setup (same as `npx rjtech-mcp-sap-abap setup`).
+- `npm run validate -- <skills-repo-dir>` checks a skills repo checkout. The skills repo's CI runs the same check through the published package.
+- `npm run smoke -- <skills-repo-dir>` is the end-to-end test: it spawns the server over stdio and checks every tool, resources, path traversal and live reload. Without an argument it syncs from GitHub. It uses a temp `RJTECH_MCP_HOME`, so it doesn't touch the user's config.
+- `npm run build` bundles everything, dependencies included, into **one file**, `dist/rjtech-mcp-sap-abap.mjs` (esbuild, `scripts/bundle.mjs`, version injected as `__RJTECH_VERSION__`). All npm deps are devDependencies for that reason. `SMOKE_BUNDLE=1 npm run smoke -- <dir>` tests the bundle.
+- `npm run typecheck`, `npm run inspect` (MCP Inspector over stdio).
+- Releasing: `.github/workflows/release.yml` creates GitHub Release `v<major>.<minor>.<run number>` on every push to `main` that touches `server/**`, `scripts/bundle.mjs` or `package*.json`. It attaches the `.mjs` (for self-update) and a `.tgz` (for the npx launcher), after a smoke test of the bundle. It needs no secrets. Bump major/minor in package.json by hand only for breaking changes.
 
-There is no test suite. To verify a change, start the server (`MCP_API_KEY=<key> npm run dev`) and POST JSON-RPC to `/mcp` with headers `Accept: application/json, text/event-stream` and `Authorization: Bearer <key>` or `x-api-key: <key>`, e.g. `tools/call` for `list_skills` and `load_skill`.
+## Configuration
 
-Environment: `MCP_API_KEY` (required, comma-separated list allowed for rotation), `MCP_AUTH_DISABLED=true` (local only; the server otherwise refuses to start without a key), `PORT` (default 3000, set by CF), `SKILLS_DIR` (default `<repo>/skills`). On CF, set the key with `cf set-env`, never in `manifest.yml`.
+Settings come from env vars, which win, then from `%USERPROFILE%\.rjtech-mcp\config.env` (written by `setup`). The settings folder can be moved with `RJTECH_MCP_HOME`.
+
+- Skills: `SKILLS_REPO` (default `RJTechRamjee/rjtech-sap-abap-skills`, defined as `DEFAULT_REPO` in `config.ts`), `SKILLS_BRANCH` (main), `SKILLS_SYNC_MINUTES` (5), `GITHUB_TOKEN` (optional for a public repo; raises the rate limit), `LOCAL_CONTENT_DIR` (read a local checkout instead of GitHub, re-read every 10 s; for skill authors).
+- Updates: `RJTECH_MCP_AUTO_UPDATE=false` turns self-update off. `SERVER_REPO` sets where releases come from. `RJTECH_MCP_RELEASES_URL` exists only for testing the updater against a local server.
+- ADT: `SAP_URL` turns the tools on, together with `SAP_USER`, `SAP_PASSWORD`, `SAP_CLIENT` (001) and `SAP_LANGUAGE` (EN).
 
 ## Architecture
 
-- `server/src/skills.ts` reads all skills once at startup into memory. A folder counts as a skill if it has `SKILL.md` with a YAML frontmatter `description`; the folder name (lowercase, digits, hyphens) is the skill name. Extra text files in the folder (e.g. `references/*.md`) are listed and served too. `readSkillFile` only serves files found at startup, which is what blocks path traversal. Changing skills requires a restart or redeploy.
-- `server/src/mcp.ts` builds the MCP server: the server `instructions` hold a one-line index of all skills; each file is a resource at `skill://<name>/<path>`; the tools are `list_skills` and `load_skill(name, file?)`. This is progressive disclosure: the model sees the index, loads a `SKILL.md` on demand, then loads `references/` files only when needed.
-- `server/src/index.ts` is the Express app. Transport is **stateless** Streamable HTTP: a new `McpServer` and transport per POST, no session IDs, so any CF instance or restart can serve any request. GET/DELETE on `/mcp` return 405. `/health` is unauthenticated for the CF health check.
-- `server/src/auth.ts` checks the API key using constant-time comparison of SHA-256 digests. OAuth (BTP XSUAA) is a planned replacement.
+- `server/src/index.ts`: the CLI (`serve` is the default, plus `setup`, `validate`, `--version`). `serve` connects `StdioServerTransport`. **stdout is the protocol**, so all logging goes to stderr (`log()` in `config.ts`). Never use `console.log` on the serve path.
+- `server/src/updater.ts`: release bundles (not source runs) check `github.com/<repo>/releases/latest` via its redirect, which isn't the REST API and so has no rate limit. They download a newer `.mjs` into `~/.rjtech-mcp/server/<version>.mjs` and `import()` the newest one on disk, with `RJTECH_MCP_HANDED_OVER` set to stop loops. The two newest bundles are kept. Failures fall back to the running version.
+- `server/src/store.ts`: `ContentStore` holds one immutable `Snapshot` (files, skills, team, problems) and replaces it whole. In GitHub mode it gets the head commit from `github.com/<repo>.git/info/refs?service=git-upload-pack` (what `git ls-remote` uses). **Avoid the REST API**: unauthenticated it allows 60 requests/hour per IP, which a team behind one office IP would exhaust. Only when the commit changes does it download one tarball from codeload, extracted by `extractContent` (a small tar reader). The cache lives in `~/.rjtech-mcp/cache/<repo>@<branch>.json` (atomic write). On startup it uses the cache, or waits up to 8 s for a first sync. A failed sync keeps the last good snapshot.
+- `server/src/skills.ts`: pure parsing from a `ContentFiles` map (repo path to text). A skill is `skills/<name>/SKILL.md` with a frontmatter `description`. Only text files under `skills/` and `team/` are kept (`isContentPath`). `readSkillFile` reads only from the map, which is what blocks path traversal. `parseTeam` reads `team/team.yaml` (zod schema; `adt.objectPrefixes` and `adt.packagePrefixes`) and `team/conventions.md`.
+- `server/src/mcp.ts`: one `McpServer` per process. Handlers read `store.current` on each call. On a store change, the `load_skill` description (which holds the skill index) is updated, which sends `tools/list_changed`, and `resources/list_changed` is sent. The server instructions (conventions + index) are fixed per session. The tools are `list_skills`, `load_skill(name, file?)`, `get_team_conventions` and `skills_status(refresh?)`. There is one resource template, `skill://{skill}/{+file}`, and one resource, `team://conventions`.
+- `server/src/adt.ts` / `adtTools.ts`: the ADT REST client (basic auth, cookies, CSRF, stateful session, lock/write/unlock, activation, all calls serialized). Write tools check names against the team prefixes on every call, on top of a hard Z/Y/$ floor in `checkObjectName`/`checkPackageName`. They never delete. Enhancement spots and BAdI implementations have no tool yet: their XML must first be captured from Eclipse's ABAP Communication Log.
+- `server/src/setup.ts`: prompts (with hidden input for secrets), writes `config.env`, tests GitHub and SAP, and prints the IDE JSON.
 
-## Writing skills
+## Skills
 
-Each `SKILL.md` starts with frontmatter `name` (equal to the folder name) and `description`. The description is what the model uses to pick the skill, so say what it does *and* when to use it. Keep `SKILL.md` focused on workflow and rules, and move long code templates into `references/`. Skills target ABAP Cloud (released APIs only), RAP with `strict ( 2 )`, CDS view entities and OData V4. Skills point to each other by name (e.g. `rap-managed-bo` points to `rap-odata-v4-service`), so keep names stable.
-
-## BTP trial notes
-
-Trial CF apps are stopped automatically, so restart them with `cf start rjtech-mcp-sap-abap`. The trial account expires unless extended. Everything needed to redeploy lives in this repo. Step-by-step deploy, first-push and key-rotation instructions are in `DEPLOY.md`.
+Skills live in the skills repo, not here. Rules for writing them are in that repo's `CONTRIBUTING.md`: frontmatter `name` equals the folder name, the `description` says what the skill does and when to use it, and it targets ABAP Cloud, RAP `strict ( 2 )`, CDS view entities and OData V4. Team-wide naming (`ZRJ_<TYPE>_`) lives in `team/conventions.md` and overrides individual skills.

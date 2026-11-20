@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: RJTechRamjee/rjtech-sap-abap-skills
+          path: skills-repo
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run validate -- skills-repo
+      # Starts the server over stdio and calls every tool, including a live reload: sources, then bundle.
+      - run: npm run smoke -- skills-repo
+      - run: npm run build
+      - run: npm run smoke -- skills-repo
+        env:
+          SMOKE_BUNDLE: "1"

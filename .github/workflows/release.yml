@@ -1,0 +1,56 @@
+name: Release
+
+# Every change to the server on main becomes a GitHub Release in this repo. No package
+# registry is involved. Each release carries:
+#   rjtech-mcp-sap-abap.mjs  the whole server in one file; running servers update themselves to it
+#   rjtech-mcp-sap-abap.tgz  the same file packed for `npx`, used only for the first launch and setup
+# Skills do NOT need a release: they sync live from the skills repo.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "scripts/bundle.mjs"
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the release
+
+concurrency: release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: RJTechRamjee/rjtech-sap-abap-skills
+          path: skills-repo
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      # Version = major.minor from package.json + the run number, so nobody bumps it by hand.
+      - name: Set version
+        run: echo "VERSION=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')").${{ github.run_number }}" >> "$GITHUB_ENV"
+      - run: npm run build
+        env:
+          RELEASE_VERSION: ${{ env.VERSION }}
+      # Test the exact file that will be released: a broken release would reach every developer.
+      - run: npm run smoke -- skills-repo
+        env:
+          SMOKE_BUNDLE: "1"
+      - name: Pack for npx
+        run: |
+          npm version "$VERSION" --no-git-tag-version
+          npm pack
+          mv "rjtech-mcp-sap-abap-$VERSION.tgz" rjtech-mcp-sap-abap.tgz
+      - name: Create release
+        run: gh release create "v$VERSION" dist/rjtech-mcp-sap-abap.mjs rjtech-mcp-sap-abap.tgz --title "v$VERSION" --generate-notes --target "$GITHUB_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}

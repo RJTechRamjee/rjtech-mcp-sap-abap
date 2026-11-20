@@ -1,18 +1,14 @@
 {
-  "inputs": [
-    {
-      "type": "promptString",
-      "id": "sap-skills-api-key",
-      "description": "API key for the SAP ABAP skills MCP server",
-      "password": true
-    }
-  ],
+  // For working on THIS repo: runs the server from source against your local checkout of the
+  // skills repo (sibling folder). Your SAP settings still come from %USERPROFILE%\.rjtech-mcp\config.env.
+  // Team members use the npx config from TEAM-SETUP.md instead.
   "servers": {
-    "sap-abap-skills-local": {
-      "type": "http",
-      "url": "http://localhost:3000/mcp",
-      "headers": {
-        "Authorization": "Bearer ${input:sap-skills-api-key}"
+    "sap-abap-skills-dev": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["tsx", "${workspaceFolder}/server/src/index.ts"],
+      "env": {
+        "LOCAL_CONTENT_DIR": "${workspaceFolder}/../rjtech-sap-abap-skills"
       }
     }
   }

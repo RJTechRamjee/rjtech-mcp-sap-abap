@@ -1,68 +1,120 @@
+#!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import express from "express";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { apiKeyAuth } from "./auth.js";
+import { pathToFileURL } from "node:url";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { AdtClient, adtConfigFromEnv } from "./adt.js";
+import { configFile, loadUserConfig, log, packageRoot, readSettings } from "./config.js";
 import { createMcpServer } from "./mcp.js";
-import { loadSkills } from "./skills.js";
+import { runSetup } from "./setup.js";
+import { parseSkills, parseTeam, readContentDir } from "./skills.js";
+import { ContentStore } from "./store.js";
+import { findNewerServer } from "./updater.js";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const skillsDir = process.env.SKILLS_DIR ?? path.join(repoRoot, "skills");
-const port = Number(process.env.PORT ?? 3000);
-const apiKeys = process.env.MCP_API_KEY ?? "";
-const authDisabled = process.env.MCP_AUTH_DISABLED === "true";
+/** Set by the release build (scripts/bundle.mjs). Undefined when running from source. */
+declare const __RJTECH_VERSION__: string | undefined;
+const bundled = typeof __RJTECH_VERSION__ === "string";
+const version: string = bundled
+  ? (__RJTECH_VERSION__ as string)
+  : JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8")).version;
+const [command, arg] = process.argv.slice(2);
 
-if (!apiKeys && !authDisabled) {
-  console.error("MCP_API_KEY is not set. Set it, or set MCP_AUTH_DISABLED=true for local testing only.");
-  process.exit(1);
-}
+if (!(await handOverToNewerVersion())) await main();
 
-const skills = await loadSkills(skillsDir);
-console.log(`Loaded ${skills.size} skill(s) from ${skillsDir}: ${[...skills.keys()].join(", ")}`);
-
-const app = express();
-app.disable("x-powered-by");
-app.use(express.json({ limit: "1mb" }));
-
-// Unauthenticated so Cloud Foundry's HTTP health check can reach it.
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", skills: skills.size });
-});
-
-if (authDisabled) {
-  console.warn("WARNING: API key auth is disabled. Never run like this on a public URL.");
-} else {
-  app.use("/mcp", apiKeyAuth(apiKeys));
-}
-
-// Stateless Streamable HTTP: a fresh server and transport per request, so any
-// instance can answer any request and app restarts lose nothing.
-app.post("/mcp", async (req, res) => {
-  const server = createMcpServer(skills);
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-  res.on("close", () => {
-    void transport.close();
-    void server.close();
-  });
+/**
+ * Release bundles check for a newer release first and, if there is one, run it instead
+ * (see updater.ts). Source runs (development) never update themselves.
+ */
+async function handOverToNewerVersion(): Promise<boolean> {
+  loadUserConfig();
+  const env = process.env;
+  if (!bundled || command === "--version" || env.RJTECH_MCP_HANDED_OVER || env.RJTECH_MCP_AUTO_UPDATE === "false") return false;
+  const newer = await findNewerServer(version);
+  if (!newer) return false;
+  env.RJTECH_MCP_HANDED_OVER = version;
+  log(`v${version} -> starting v${newer.version}`);
   try {
-    await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
+    await import(pathToFileURL(newer.file).href);
+    return true;
   } catch (err) {
-    console.error("Error handling MCP request:", err);
-    if (!res.headersSent) {
-      res.status(500).json({ jsonrpc: "2.0", error: { code: -32603, message: "Internal server error" }, id: null });
-    }
+    log(`v${newer.version} failed to start (${(err as Error).message}); falling back to v${version}.`);
+    return false;
   }
-});
+}
 
-// Stateless mode has no server-initiated stream (GET) or session to end (DELETE).
-app.all("/mcp", (_req, res) => {
-  res
-    .status(405)
-    .set("Allow", "POST")
-    .json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed" }, id: null });
-});
+async function main() {
+  switch (command) {
+    case undefined:
+    case "serve":
+      await serve();
+      break;
+    case "setup":
+      await runSetup(version);
+      break;
+    case "validate":
+      process.exitCode = await validate(arg ?? ".");
+      break;
+    case "--version":
+    case "-v":
+      console.log(version);
+      break;
+    default:
+      console.log(
+        [
+          `rjtech-mcp-sap-abap ${version}`,
+          "",
+          "  (no command)       start the MCP server on stdio (your IDE does this)",
+          "  setup              create or update your settings in " + configFile,
+          "  validate [dir]     check a skills repo checkout (skills/ and team/) for problems",
+          "  --version          print the version",
+        ].join("\n"),
+      );
+  }
+}
 
-app.listen(port, () => {
-  console.log(`MCP server listening on http://localhost:${port}/mcp`);
-});
+/** Runs the MCP server over stdio. The IDE starts this process and talks to it via stdin/stdout. */
+async function serve() {
+  loadUserConfig();
+  const settings = readSettings();
+  const adtConfig = adtConfigFromEnv();
+  const adt = adtConfig ? new AdtClient(adtConfig) : undefined;
+
+  const store = await ContentStore.start(settings);
+  const s = store.current;
+  log(`v${version}: ${s.skills.size} skill(s) from ${s.source}; syncing from ${store.description}.`);
+  log(adt ? `ADT tools on for ${adtConfig!.url} (client ${adtConfig!.client}).` : "ADT tools off (SAP_URL not set).");
+
+  const server = createMcpServer(store, version, adt);
+  await server.connect(new StdioServerTransport());
+
+  const shutdown = async () => {
+    store.stop();
+    await server.close().catch(() => undefined);
+    process.exit(0);
+  };
+  // The IDE closes stdin when it stops the server.
+  process.stdin.on("close", shutdown);
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+}
+
+/** Checks a skills repo checkout. Used by the skills repo's GitHub Action and by authors before pushing. */
+async function validate(dir: string): Promise<number> {
+  const files = await readContentDir(path.resolve(dir));
+  const { skills, problems } = parseSkills(files);
+  const team = parseTeam(files);
+  const all = [...problems, ...team.problems];
+  if (!files.has("team/conventions.md")) all.push("team/conventions.md is missing.");
+  if (!files.has("team/team.yaml")) all.push("team/team.yaml is missing.");
+  if (skills.size === 0) all.push(`No skills found under ${path.resolve(dir, "skills")}.`);
+
+  console.log(`Skills (${skills.size}): ${[...skills.keys()].join(", ") || "-"}`);
+  console.log(`ADT write rules: objects ${team.team.objectPrefixes.join("/")}*, packages ${team.team.packagePrefixes.join("/")}*`);
+  if (all.length) {
+    console.log(`\n${all.length} problem(s):`);
+    for (const p of all) console.log(`  - ${p}`);
+    return 1;
+  }
+  console.log("\nOK");
+  return 0;
+}
