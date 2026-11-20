@@ -100,6 +100,31 @@ To change anything later (for example a new SAP password), run the same command 
 2. Ask: *"Call skills_status"*. You should see `Skills: 5 (...)` and `Last error: none`. If you connected SAP, you should also see `ADT: <your SAP URL>`.
 3. Try a real task, e.g. *"Create a managed RAP BO for a Travel table"*. Copilot should load the `rap-managed-bo` skill and use names like `ZRJ_CA_DMO_R_Travel` (module + submodule after `ZRJ_`).
 
+## 5. Use the ABAP Developer agent
+
+The server installs a Copilot custom agent, **ABAP Developer**, which always works from the
+project's skills and conventions. Use it for ABAP work instead of the default agent; the default
+agent may pick other skills or search your files for "standards". The agent comes from the
+skills repo and updates by itself.
+
+> Keep the server name `sap-abap-skills` in the IDE configuration from step 3. The agent
+> finds the server's tools by that name.
+
+**VS Code:** after the server has run once, open Copilot Chat and pick **ABAP Developer** in
+the agent dropdown (where *Agent* / *Ask* / *Edit* are). If it isn't listed, reload the window
+(`Ctrl+Shift+P` → **Developer: Reload Window**).
+
+**Eclipse:** Eclipse only finds agents inside a project of your workspace, so the server keeps
+a small project for it. Import it once:
+
+1. **File → Import → General → Existing Projects into Workspace**.
+2. Root directory: `%USERPROFILE%\.rjtech-mcp\eclipse\rjtech-copilot`. Don't tick *Copy projects
+   into workspace*, so the project keeps receiving updates.
+3. **Finish**. Then pick **ABAP Developer** in the Copilot Chat agent picker.
+
+Custom agents in Copilot for Eclipse are still in preview. If the agent doesn't show up, use
+Agent mode and start with *"Use the sap-abap-skills server: call get_project_conventions"*.
+
 ## Day-to-day
 
 - **New or changed skills** arrive within about 5 minutes. For an immediate check, ask Copilot to *"call skills_status with refresh true"*.
@@ -123,6 +148,8 @@ When the ADT tools are connected:
 | `skills_status` shows a GitHub error | Check your internet connection. The server keeps using the cached skills meanwhile. Corporate proxies aren't supported yet, so tell the maintainer if you are behind one. |
 | "SAP rejected the user or password (HTTP 401)" | Run the setup again with the right password. |
 | "Cannot reach the SAP system" | Start the SAP system (Docker), or check the URL in the setup. |
-| Copilot ignores the skills | Use **Agent** mode. Check that the server shows as running in the IDE's MCP view. |
+| Copilot ignores the skills | Use the **ABAP Developer** agent (step 5). Check that the server shows as running in the IDE's MCP view. |
+| ABAP Developer agent is missing | `skills_status` shows where the agent was installed and any problem. VS Code: reload the window. Eclipse: import the helper project (step 5). |
+| ABAP Developer has no SAP/skills tools | The server's name in your IDE configuration must be `sap-abap-skills`. |
 | A new server version misbehaves | Add `RJTECH_MCP_AUTO_UPDATE="false"` to `config.env` and tell the maintainer. To go back a version, also delete the newest file in `%USERPROFILE%\.rjtech-mcp\server\`. |
 | Start from scratch | Delete the `%USERPROFILE%\.rjtech-mcp` folder and run the setup again. |

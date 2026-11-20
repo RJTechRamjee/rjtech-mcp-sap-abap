@@ -6,7 +6,7 @@
  *
  * Uses a temporary settings folder, so your own config.env and cache are not touched.
  */
-import { cp, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -29,8 +29,16 @@ if (contentArg) {
   await cp(path.resolve(contentArg), contentDir, { recursive: true, filter: (src) => !src.includes(`${path.sep}.git`) });
 }
 
-const env: Record<string, string> = { ...(process.env as Record<string, string>), RJTECH_MCP_HOME: path.join(tmp, "home") };
+// Agents are installed into temp folders too, never into the real ~/.copilot/agents.
+const vscodeAgents = path.join(tmp, "vscode-agents");
+const eclipseAgents = path.join(tmp, "home", "eclipse", "rjtech-copilot", ".github", "agents");
+const env: Record<string, string> = {
+  ...(process.env as Record<string, string>),
+  RJTECH_MCP_HOME: path.join(tmp, "home"),
+  RJTECH_MCP_VSCODE_AGENTS_DIR: vscodeAgents,
+};
 delete env.SAP_URL;
+delete env.RJTECH_MCP_INSTALL_AGENTS;
 if (contentDir) env.LOCAL_CONTENT_DIR = contentDir;
 else delete env.LOCAL_CONTENT_DIR;
 
@@ -92,6 +100,15 @@ try {
   const status = textOf(await client.callTool({ name: "skills_status", arguments: { refresh: true } }));
   console.log(status.replace(/^/gm, "      "));
   check(/Last error: none/.test(status), "skills_status reports no sync error");
+  check(/Agents: abap-developer/.test(status) && !/Problem:/.test(status), "skills_status lists the installed agents");
+
+  const agentFile = "rjtech-abap-developer.agent.md";
+  const vsAgent = await readFile(path.join(vscodeAgents, agentFile), "utf8").catch(() => "");
+  check(vsAgent.startsWith("---\n") && vsAgent.includes("Installed by the rjtech-mcp-sap-abap server"), "agent installed for VS Code (frontmatter first)");
+  const ecAgent = await readFile(path.join(eclipseAgents, agentFile), "utf8").catch(() => "");
+  check(ecAgent === vsAgent, "agent installed into the Eclipse helper project");
+  const dotProject = await readFile(path.join(eclipseAgents, "..", "..", ".project"), "utf8").catch(() => "");
+  check(dotProject.includes("<name>rjtech-copilot</name>"), "Eclipse helper project has a .project file");
 
   if (contentDir) {
     await mkdir(path.join(contentDir, "skills", "smoke-test-skill"), { recursive: true });
@@ -109,6 +126,18 @@ try {
     check(toolsChanged > 0, "client is notified (tools/list_changed)");
     const desc = (await client.listTools()).tools.find((t) => t.name === "load_skill")?.description ?? "";
     check(desc.includes("smoke-test-skill"), "load_skill description lists the new skill");
+
+    // Removing an agent from the repo removes only our installed file, never other agents.
+    const foreign = path.join(vscodeAgents, "someone-else.agent.md");
+    await writeFile(foreign, "---\ndescription: not ours\n---\n");
+    await rm(path.join(contentDir, "agents", "abap-developer.agent.md"));
+    let gone = false;
+    for (let i = 0; i < 15 && !gone; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      gone = !(await readFile(path.join(vscodeAgents, agentFile), "utf8").then(() => true, () => false));
+    }
+    check(gone, "a removed agent is uninstalled");
+    check(await readFile(foreign, "utf8").then(() => true, () => false), "other agents in the folder are left alone");
   }
 } catch (err) {
   failures++;

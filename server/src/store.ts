@@ -2,20 +2,33 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
 import { homeDir, log, USER_AGENT, type Settings } from "./config.js";
-import { isContentPath, parseSkills, parseProject, readContentDir, type ContentFiles, type Project, type Skill } from "./skills.js";
+import {
+  isContentPath,
+  parseAgents,
+  parseProject,
+  parseSkills,
+  readContentDir,
+  type Agent,
+  type ContentFiles,
+  type Project,
+  type Skill,
+} from "./skills.js";
 
 /** One consistent version of all skills and project settings. Replaced as a whole on every change. */
 export interface Snapshot {
   files: ContentFiles;
   skills: Map<string, Skill>;
   project: Project;
+  /** Copilot custom agents (agents/*.agent.md), installed into the IDEs by agents.ts. */
+  agents: Agent[];
   problems: string[];
   /** Where the content came from, e.g. "github main@1a2b3c4" or "local folder". */
   source: string;
 }
 
 interface CacheFile {
-  format: 2;
+  /** 3 since agents/ is synced too: older caches lack it, so they are re-downloaded once. */
+  format: 3;
   repo: string;
   branch: string;
   commit: string;
@@ -25,7 +38,8 @@ interface CacheFile {
 function buildSnapshot(files: ContentFiles, source: string): Snapshot {
   const s = parseSkills(files);
   const p = parseProject(files);
-  return { files, skills: s.skills, project: p.project, problems: [...s.problems, ...p.problems], source };
+  const a = parseAgents(files);
+  return { files, skills: s.skills, project: p.project, agents: a.agents, problems: [...s.problems, ...p.problems, ...a.problems], source };
 }
 
 /**
@@ -123,7 +137,7 @@ export class ContentStore {
     if (this.cache && commit === this.cache.commit) return;
 
     const files = await this.downloadTarball(commit);
-    this.cache = { format: 2, repo, branch, commit, files: Object.fromEntries(files) };
+    this.cache = { format: 3, repo, branch, commit, files: Object.fromEntries(files) };
     await writeCache(this.settings, this.cache);
     const snapshot = buildSnapshot(files, `github ${branch}@${commit.slice(0, 7)}`);
     this.publish(snapshot);
@@ -178,7 +192,7 @@ export class ContentStore {
 }
 
 /**
- * Reads the text files under skills/ and project/ from an (uncompressed) tar archive as GitHub
+ * Reads the text files under skills/, project/ and agents/ from an (uncompressed) tar archive as GitHub
  * produces it: one top folder "<owner>-<repo>-<sha>/", ustar headers, pax headers for long names.
  */
 export function extractContent(tar: Buffer): ContentFiles {
@@ -217,7 +231,7 @@ const cachePath = (s: Settings) => path.join(homeDir, "cache", `${s.repo.replace
 async function readCache(s: Settings): Promise<CacheFile | undefined> {
   try {
     const cache = JSON.parse(await readFile(cachePath(s), "utf8")) as CacheFile;
-    return cache.format === 2 && cache.repo === s.repo && cache.branch === s.branch ? cache : undefined;
+    return cache.format === 3 && cache.repo === s.repo && cache.branch === s.branch ? cache : undefined;
   } catch {
     return undefined;
   }

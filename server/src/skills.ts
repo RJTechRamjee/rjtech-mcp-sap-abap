@@ -21,7 +21,7 @@ export interface Skill {
   files: string[];
 }
 
-export const CONTENT_ROOTS = ["skills/", "project/"];
+export const CONTENT_ROOTS = ["skills/", "project/", "agents/"];
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 // Only text files are served; anything else is ignored.
@@ -86,6 +86,50 @@ export function parseSkills(files: ContentFiles): { skills: Map<string, Skill>; 
     });
   }
   return { skills, problems };
+}
+
+/**
+ * A Copilot custom agent, agents/<name>.agent.md. The server installs it into the IDEs
+ * (see agents.ts); the file is used as-is, frontmatter included.
+ */
+export interface Agent {
+  name: string;
+  description: string;
+  /** The whole file, frontmatter included. */
+  raw: string;
+}
+
+const AGENT_FILE = /^agents\/([^/]+)\.agent\.md$/;
+
+export function parseAgents(files: ContentFiles): { agents: Agent[]; problems: string[] } {
+  const agents: Agent[] = [];
+  const problems: string[] = [];
+  for (const [p, raw] of [...files].sort(([a], [b]) => a.localeCompare(b))) {
+    if (!p.startsWith("agents/")) continue;
+    const match = AGENT_FILE.exec(p);
+    if (!match) {
+      problems.push(`${p}: agent files must be agents/<name>.agent.md; file ignored.`);
+      continue;
+    }
+    const name = match[1];
+    if (!NAME_PATTERN.test(name)) {
+      problems.push(`${p}: use lowercase letters, digits and hyphens in the file name.`);
+      continue;
+    }
+    let meta: Record<string, unknown>;
+    try {
+      meta = splitFrontmatter(raw).meta;
+    } catch (err) {
+      problems.push(`${p}: invalid YAML frontmatter (${(err as Error).message}).`);
+      continue;
+    }
+    if (typeof meta.description !== "string" || !meta.description.trim()) {
+      problems.push(`${p}: frontmatter needs a "description"; agent skipped.`);
+      continue;
+    }
+    agents.push({ name, description: meta.description.trim().replace(/\s+/g, " "), raw });
+  }
+  return { agents, problems };
 }
 
 /** Extra files can only be read if they are in the content map, so "../" tricks cannot reach the disk. */
@@ -229,7 +273,7 @@ export function parseProject(files: ContentFiles): { project: Project; problems:
   };
 }
 
-/** Reads skills/ and project/ from a folder on disk (repo checkout or the installed package). */
+/** Reads skills/, project/ and agents/ from a folder on disk (repo checkout or the installed package). */
 export async function readContentDir(baseDir: string): Promise<ContentFiles> {
   const files: ContentFiles = new Map();
   async function walk(dir: string, rel: string) {

@@ -31,7 +31,7 @@ export interface Settings {
   branch: string;
   token?: string;
   syncIntervalMs: number;
-  /** Local mode: a checkout of the skills repo (folder that contains skills/ and project/). */
+  /** Local mode: a checkout of the skills repo (folder that contains skills/, project/ and agents/). */
   localDir: string;
 }
 

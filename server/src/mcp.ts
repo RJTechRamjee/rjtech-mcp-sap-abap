@@ -49,7 +49,7 @@ const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
  * next call. The skill index in the load_skill description and the resource list are
  * refreshed when the store changes (clients are told via list_changed notifications).
  */
-export function createMcpServer(store: ContentStore, version: string, adt?: AdtClient): McpServer {
+export function createMcpServer(store: ContentStore, version: string, adt?: AdtClient, agentStatus?: () => string): McpServer {
   const server = new McpServer(
     { name: SERVER_NAME, version },
     { instructions: buildInstructions(store.current, adt), capabilities: { tools: { listChanged: true }, resources: { listChanged: true } } },
@@ -192,6 +192,7 @@ export function createMcpServer(store: ContentStore, version: string, adt?: AdtC
           `Last check: ${store.lastCheck?.toISOString() ?? "never"}`,
           `Last error: ${store.lastError ?? "none"}`,
           `ADT: ${adt ? adt.systemUrl : "off"}`,
+          agentStatus?.() ?? `Agents: ${s.agents.map((a) => a.name).join(", ") || "(none)"} (not installed by this process)`,
           `Write tools allow objects ${s.project.objectPrefixes.join("/")}* in packages ${s.project.packagePrefixes.join("/")}*`,
           s.problems.length ? `Content problems:\n- ${s.problems.join("\n- ")}` : "Content problems: none",
         ].join("\n"),

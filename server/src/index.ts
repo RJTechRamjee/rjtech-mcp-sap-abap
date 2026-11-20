@@ -4,10 +4,11 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { AdtClient, adtConfigFromEnv } from "./adt.js";
+import { agentInstallEnabled, agentTargets, installAgents } from "./agents.js";
 import { configFile, loadUserConfig, log, packageRoot, readSettings } from "./config.js";
 import { createMcpServer } from "./mcp.js";
 import { runSetup } from "./setup.js";
-import { PROJECT_CONVENTIONS, PROJECT_YAML, parseProject, parseSkills, readContentDir } from "./skills.js";
+import { PROJECT_CONVENTIONS, PROJECT_YAML, parseAgents, parseProject, parseSkills, readContentDir } from "./skills.js";
 import { ContentStore } from "./store.js";
 import { findNewerServer } from "./updater.js";
 
@@ -65,7 +66,7 @@ async function main() {
           "",
           "  (no command)       start the MCP server on stdio (your IDE does this)",
           "  setup              create or update your settings in " + configFile,
-          "  validate [dir]     check a skills repo checkout (skills/ and project/) for problems",
+          "  validate [dir]     check a skills repo checkout (skills/, project/, agents/) for problems",
           "  --version          print the version",
         ].join("\n"),
       );
@@ -84,7 +85,26 @@ async function serve() {
   log(`v${version}: ${s.skills.size} skill(s) from ${s.source}; syncing from ${store.description}.`);
   log(adt ? `ADT tools on for ${adtConfig!.url} (client ${adtConfig!.client}).` : "ADT tools off (SAP_URL not set).");
 
-  const server = createMcpServer(store, version, adt);
+  // Copilot custom agents from the skills repo: install now and after every content change.
+  const targets = agentTargets();
+  let agentProblems: string[] = [];
+  const agentsOn = agentInstallEnabled();
+  const syncAgents = async () => {
+    if (agentsOn) agentProblems = await installAgents(store.current.agents, targets);
+  };
+  await syncAgents();
+  store.onChange(() => void syncAgents());
+  const agentStatus = () =>
+    !agentsOn
+      ? "Agents: install off (RJTECH_MCP_INSTALL_AGENTS=false)"
+      : [
+          `Agents: ${store.current.agents.map((a) => a.name).join(", ") || "(none)"}`,
+          `  VS Code: ${targets.vscode}`,
+          `  Eclipse project: ${targets.eclipseProject}`,
+          ...agentProblems.map((p) => `  Problem: ${p}`),
+        ].join("\n");
+
+  const server = createMcpServer(store, version, adt, agentStatus);
   await server.connect(new StdioServerTransport());
 
   const shutdown = async () => {
@@ -103,11 +123,14 @@ async function validate(dir: string): Promise<number> {
   const files = await readContentDir(path.resolve(dir));
   const { skills, problems } = parseSkills(files);
   const project = parseProject(files);
-  const all = [...problems, ...project.problems];
+  const agents = parseAgents(files);
+  const all = [...problems, ...project.problems, ...agents.problems];
   if (!files.has(PROJECT_CONVENTIONS)) all.push(`${PROJECT_CONVENTIONS} is missing.`);
-  if (!files.has(PROJECT_YAML)) all.push(`${PROJECT_YAML} is missing.`);  if (skills.size === 0) all.push(`No skills found under ${path.resolve(dir, "skills")}.`);
+  if (!files.has(PROJECT_YAML)) all.push(`${PROJECT_YAML} is missing.`);
+  if (skills.size === 0) all.push(`No skills found under ${path.resolve(dir, "skills")}.`);
 
   console.log(`Skills (${skills.size}): ${[...skills.keys()].join(", ") || "-"}`);
+  console.log(`Agents (${agents.agents.length}): ${agents.agents.map((a) => a.name).join(", ") || "-"}`);
   console.log(`ADT write rules: objects ${project.project.objectPrefixes.join("/")}*, packages ${project.project.packagePrefixes.join("/")}*`);
   if (all.length) {
     console.log(`\n${all.length} problem(s):`);

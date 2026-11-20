@@ -82,6 +82,7 @@ If GitHub can't be reached, the server keeps the last good version and `skills_s
 | **Tools** | `list_skills`, `load_skill(name, file?)`, `get_project_conventions(topic?)`, `skills_status` | Functions the **model decides to call on its own** |
 | **ADT tools** (if SAP is configured) | `adt_create_class`, `adt_create_interface`, `adt_update_source`, `adt_activate`, `adt_read_source`, `adt_discovery`, `adt_get` | Create, change and activate objects through the same REST API Eclipse uses |
 | **Resources** | `skill://<name>/<file>`, `project://conventions`, `project://naming/<topic>` | The same content as documents the user can browse and attach |
+| **Copilot agents** | `agents/*.agent.md` in the skills repo, installed by [agents.ts](server/src/agents.ts) | Not part of MCP: the server copies them into VS Code (`~/.copilot/agents/`) and an Eclipse helper project, so developers can pick the **ABAP Developer** agent, which always uses this server |
 
 Tools work like function modules the AI can call. Resources work like files it can open.
 
